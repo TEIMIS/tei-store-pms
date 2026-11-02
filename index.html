@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TEI Store PMS</title>
+<link rel="icon" href="assets/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<header class="brand">
+  <div class="wrap">
+    <img alt="TEI logo" src="assets/logo.png">
+    <div class="co"><b>TATERS ENTERPRISES, INC.</b><span>TEI IT Operations · Store Preventive Maintenance</span></div>
+    <div class="me" id="me"></div>
+  </div>
+</header>
+<nav class="tabs" aria-label="Sections"><div class="wrap" id="nav"></div></nav>
+<main class="wrap" id="app" aria-live="polite">
+  <div class="empty"><h3>Loading…</h3></div>
+</main>
+<div id="sheet-root"></div>
+<div id="toast-root"></div>
+
+<noscript><p style="padding:16px">This app needs JavaScript turned on.</p></noscript>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.115.0/dist/umd/supabase.js"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
