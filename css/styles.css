@@ -263,11 +263,8 @@ select.inp.auto{width:auto}
 .auth-msg{background:var(--ok-bg);color:var(--ok);padding:10px 12px;border-radius:6px;font-size:13px}
 .auth-actions{display:flex;gap:8px;flex-wrap:wrap}
 
-/* ---------- lease + software ---------- */
-.subbox{border:1px solid var(--line);border-radius:6px;padding:12px;display:grid;gap:12px;background:var(--surface-2)}
-.checkline{display:flex;gap:10px;align-items:flex-start;font-size:13px;cursor:pointer}
-.checkline input{width:18px;height:18px;accent-color:var(--accent);flex:none;margin-top:1px}
+/* ---------- lease type ---------- */
+.subbox{border:1px solid var(--line);border-radius:6px;padding:12px;display:grid;gap:10px;background:var(--surface-2)}
 .sc-chips{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
 .chip-lease{background:var(--info-bg);color:var(--info)}
-.lease-line{display:flex;gap:8px 12px;flex-wrap:wrap;align-items:center;margin:-6px 0 10px}
-.eqd-sub{font-size:12px;margin-top:4px}
+.lease-line{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:-6px 0 10px}

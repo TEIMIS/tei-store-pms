@@ -32,7 +32,7 @@ js/config.js          Supabase URL + publishable key (safe to be public)
 js/app.js             The app
 assets/logo.png       TEI logo
 supabase/schema.sql   Tables, roles, and security rules (run once in Supabase)
-supabase/002_software_and_lease.sql   Update: software checks, lease type, daily sales sending
+supabase/002_software_and_lease.sql   Update: lease type + mall sales software (Project UNO, SIA Mosaic, SFTP Server)
 ```
 
 ## First-time setup
