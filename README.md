@@ -32,11 +32,12 @@ js/config.js          Supabase URL + publishable key (safe to be public)
 js/app.js             The app
 assets/logo.png       TEI logo
 supabase/schema.sql   Tables, roles, and security rules (run once in Supabase)
+supabase/002_software_and_lease.sql   Update: software checks, lease type, daily sales sending
 ```
 
 ## First-time setup
 
-1. In Supabase, open **SQL Editor → New query**, paste all of `supabase/schema.sql`, and click **Run**.
+1. In Supabase, open **SQL Editor → New query**, paste all of `supabase/schema.sql`, and click **Run**. Then do the same with `supabase/002_software_and_lease.sql`.
 2. In a new query, paste the data import file (`seed_data.sql`, kept outside this public repo) and click **Run**.
 3. Open the live site and **register first**. The first account created becomes the Admin automatically.
 4. Everyone else registers from the sign-in page and waits for you to approve them in **Users**.

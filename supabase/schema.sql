@@ -1,12 +1,11 @@
 -- =====================================================================
 -- TEI Store PMS — database setup (run once in Supabase → SQL Editor)
 -- Creates tables, the approval/role system, and security rules.
--- Safe to run on a fresh project. Running it twice will fail on
--- "already exists" — that is expected and harmless.
+-- Safe to run more than once.
 -- =====================================================================
 
 -- ---------- 1. User profiles (approval + role) ----------
-create table public.profiles (
+create table if not exists public.profiles (
   id          uuid primary key references auth.users(id) on delete cascade,
   email       text not null,
   full_name   text not null default '',
@@ -54,6 +53,7 @@ begin
 end;
 $$;
 
+drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
@@ -69,12 +69,13 @@ begin
 end;
 $$;
 
+drop trigger if exists guard_profile_update on public.profiles;
 create trigger guard_profile_update
   before update on public.profiles
   for each row execute function public.guard_profile_update();
 
 -- ---------- 2. PMS data ----------
-create table public.stores (
+create table if not exists public.stores (
   id         text primary key default gen_random_uuid()::text,
   name       text not null,
   code       text not null default '',
@@ -85,7 +86,7 @@ create table public.stores (
   updated_at timestamptz not null default now()
 );
 
-create table public.equipment_types (
+create table if not exists public.equipment_types (
   id          text primary key default gen_random_uuid()::text,
   name        text not null,
   prefix      text not null default '',
@@ -96,7 +97,7 @@ create table public.equipment_types (
   updated_at  timestamptz not null default now()
 );
 
-create table public.equipment (
+create table if not exists public.equipment (
   id         text primary key default gen_random_uuid()::text,
   store_id   text not null references public.stores(id) on delete cascade,
   type_id    text not null references public.equipment_types(id) on delete restrict,
@@ -112,9 +113,9 @@ create table public.equipment (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index equipment_store_idx on public.equipment(store_id);
+create index if not exists equipment_store_idx on public.equipment(store_id);
 
-create table public.pm_records (
+create table if not exists public.pm_records (
   id             text primary key default gen_random_uuid()::text,
   equipment_id   text references public.equipment(id) on delete set null,
   store_id       text references public.stores(id) on delete set null,
@@ -132,8 +133,8 @@ create table public.pm_records (
   created_by     uuid references auth.users(id) default auth.uid(),
   created_at     timestamptz not null default now()
 );
-create index pm_equipment_idx on public.pm_records(equipment_id);
-create index pm_date_idx on public.pm_records(date desc);
+create index if not exists pm_equipment_idx on public.pm_records(equipment_id);
+create index if not exists pm_date_idx on public.pm_records(date desc);
 
 -- ---------- 3. Security rules (Row Level Security) ----------
 alter table public.profiles        enable row level security;
@@ -143,35 +144,54 @@ alter table public.equipment       enable row level security;
 alter table public.pm_records      enable row level security;
 
 -- Profiles: you see your own; admins see and manage everyone.
+drop policy if exists "profiles: read own or admin" on public.profiles;
 create policy "profiles: read own or admin" on public.profiles
   for select to authenticated using (id = auth.uid() or public.is_admin());
+drop policy if exists "profiles: admin updates" on public.profiles;
 create policy "profiles: admin updates" on public.profiles
   for update to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "profiles: admin deletes" on public.profiles;
 create policy "profiles: admin deletes" on public.profiles
   for delete to authenticated using (public.is_admin());
 
 -- Stores, types, equipment: approved users read; only admins change.
+drop policy if exists "stores: approved read" on public.stores;
 create policy "stores: approved read" on public.stores for select to authenticated using (public.is_approved());
+drop policy if exists "stores: admin insert" on public.stores;
 create policy "stores: admin insert"  on public.stores for insert to authenticated with check (public.is_admin());
+drop policy if exists "stores: admin update" on public.stores;
 create policy "stores: admin update"  on public.stores for update to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "stores: admin delete" on public.stores;
 create policy "stores: admin delete"  on public.stores for delete to authenticated using (public.is_admin());
 
+drop policy if exists "types: approved read" on public.equipment_types;
 create policy "types: approved read" on public.equipment_types for select to authenticated using (public.is_approved());
+drop policy if exists "types: admin insert" on public.equipment_types;
 create policy "types: admin insert"  on public.equipment_types for insert to authenticated with check (public.is_admin());
+drop policy if exists "types: admin update" on public.equipment_types;
 create policy "types: admin update"  on public.equipment_types for update to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "types: admin delete" on public.equipment_types;
 create policy "types: admin delete"  on public.equipment_types for delete to authenticated using (public.is_admin());
 
+drop policy if exists "equipment: approved read" on public.equipment;
 create policy "equipment: approved read" on public.equipment for select to authenticated using (public.is_approved());
+drop policy if exists "equipment: admin insert" on public.equipment;
 create policy "equipment: admin insert"  on public.equipment for insert to authenticated with check (public.is_admin());
+drop policy if exists "equipment: admin update" on public.equipment;
 create policy "equipment: admin update"  on public.equipment for update to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "equipment: admin delete" on public.equipment;
 create policy "equipment: admin delete"  on public.equipment for delete to authenticated using (public.is_admin());
 
 -- PM records: approved users read; Admin + IT Staff record (as themselves);
 -- only admins edit or delete records.
+drop policy if exists "pm: approved read" on public.pm_records;
 create policy "pm: approved read" on public.pm_records for select to authenticated using (public.is_approved());
+drop policy if exists "pm: staff insert" on public.pm_records;
 create policy "pm: staff insert"  on public.pm_records for insert to authenticated
   with check (public.can_record_pm() and created_by = auth.uid());
+drop policy if exists "pm: admin update" on public.pm_records;
 create policy "pm: admin update"  on public.pm_records for update to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "pm: admin delete" on public.pm_records;
 create policy "pm: admin delete"  on public.pm_records for delete to authenticated using (public.is_admin());
 
 -- Nobody signed-out (anon) gets any access: no policies are granted to anon.

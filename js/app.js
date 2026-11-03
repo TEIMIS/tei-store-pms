@@ -2,6 +2,32 @@ const CATS=['POS & Computers','Peripherals','Printing','Network','Security','Pow
 const STATUSES=['Operational','For Monitoring','Defective','Under Maintenance'];
 const STATUS_HELP={'Operational':'Working normally','For Monitoring':'Working, re-check next visit','Defective':'Needs repair or replacement','Under Maintenance':'Being repaired or with vendor'};
 const STORE_TYPES=['In-Line','Kiosk','Other'];
+const LEASE_TYPES=['Fixed','Percentage'];
+const MALLS=[['Ayala Malls','Project UNO'],['SM Supermalls','SIA Mosaic'],['Robinsons Malls','SFTP Server'],['Other','']];
+const mallIface=m=>(MALLS.find(x=>x[0]===m)||['',''])[1];
+const SALES_CHECKS=['Mall interface connected','Mall interface configured','Daily sales file sent successfully','Sales received by the mall (no missing or rejected days)'];
+const isPct=s=>(s&&s.leaseType)==='Percentage';
+function radioRows(prefix,list,labels){return list.map((c,k)=>`<div class="check-row"><span class="t">${esc(c)}</span><span class="rad" role="radiogroup" aria-label="${esc(c)}">${labels.map(([val,lab,cl])=>`<label><input type="radio" name="${prefix}${k}" value="${val}"><span class="${cl}">${lab}</span></label>`).join('')}</span></div>`).join('')}
+const LBL_CHECK=[['OK','OK','v-ok'],['Not OK','Not OK','v-bad'],['N/A','N/A','v-na']];
+const LBL_SOFT=[['OK','Working','v-ok'],['Not OK','Issue','v-bad'],['N/A','N/A','v-na']];
+const LBL_SALES=[['OK','OK','v-ok'],['Not OK','Failed','v-bad'],['N/A','N/A','v-na']];
+function readRadios(prefix,list){return list.map((c,k)=>({t:c,r:document.querySelector(`input[name="${prefix}${k}"]:checked`)?.value||''}))}
+function resultTag(r){return r==='OK'?'<span class="r-ok">✓ OK</span>':r==='Not OK'?'<span class="r-bad">✕ Issue</span>':'<span class="r-na">N/A</span>'}
+function storeSales(sid,L){let best=null;for(const e of storeEquip(sid)){if(!S.types[e.typeId]?.salesSending)continue;for(const r of Object.values(S.pm)){if(r.equipmentId!==e.id||!r.sales)continue;if(!best||(r.date||'')>(best.date||'')||((r.date||'')===(best.date||'')&&(r.createdAt||0)>(best.createdAt||0)))best=r}}
+  if(!best)return{state:'none'};const bad=(best.sales.items||[]).some(x=>x.r==='Not OK');return{state:bad?'bad':'ok',rec:best}}
+function salesTag(s,L){if(!isPct(s))return '';const x=storeSales(s.id,L);const iface=s.mallInterface?esc(s.mallInterface):'Daily sales';
+  if(x.state==='none')return `<span class="tag">${iface}: not checked yet</span>`;
+  return x.state==='ok'?`<span class="tag ok">${iface}: sending OK</span>`:`<span class="tag bad">${iface}: sending issue</span>`}
+function leaseLine(s,L){if(!isPct(s))return `<div class="lease-line"><span class="chip">Fixed lease</span></div>`;const x=storeSales(s.id,L);
+  return `<div class="lease-line"><span class="chip chip-lease">Percentage lease</span><span class="note">${esc(s.mallOperator||'Mall')} · daily sales via <b>${esc(s.mallInterface||'—')}</b>${s.tenantId?` · Tenant ID ${esc(s.tenantId)}`:''}</span>${salesTag(s,L)}${x.rec?`<span class="note">Last checked ${fmt(x.rec.date)}${x.rec.sales.lastSent?` · last successful send ${fmt(x.rec.sales.lastSent)}`:''}</span>`:''}</div>`}
+function extraResults(r){let h='';const sw=r.software||[];
+  if(sw.length){const ok=sw.filter(x=>x.r==='OK').length,app=sw.filter(x=>x.r!=='N/A').length;h+=`<div class="eqd-sub"><span class="k">Software</span><b class="${ok===app?'r-ok':'r-bad'}">${ok} of ${app} working</b></div><ul class="eqd-list">${sw.map(x=>`<li><span>${esc(x.t)}</span>${resultTag(x.r)}</li>`).join('')}</ul>`}
+  if(r.sales){const it=r.sales.items||[];h+=`<div class="eqd-sub"><span class="k">Daily sales sending</span><b>${esc(r.sales.interface||'Mall interface')}</b>${r.sales.lastSent?` · last successful send ${fmt(r.sales.lastSent)}`:''}</div><ul class="eqd-list">${it.map(x=>`<li><span>${esc(x.t)}</span>${resultTag(x.r)}</li>`).join('')}</ul>`}
+  return h}
+function histExtra(r){const sw=r.software||[];let h='';
+  if(sw.length)h+=`<details class="h-check"><summary>Software results</summary><ul>${sw.map(x=>`<li><span>${esc(x.t)}</span>${resultTag(x.r)}</li>`).join('')}</ul></details>`;
+  if(r.sales)h+=`<details class="h-check"><summary>Daily sales sending · ${esc(r.sales.interface||'Mall interface')}</summary><ul>${(r.sales.items||[]).map(x=>`<li><span>${esc(x.t)}</span>${resultTag(x.r)}</li>`).join('')}${r.sales.lastSent?`<li><span>Last successful send</span><span>${fmt(r.sales.lastSent)}</span></li>`:''}</ul></details>`;
+  return h}
 const S={stores:{},equipment:{},types:{},pm:{},ready:{stores:false,equipment:false,types:false,pm:false}};
 let sb=null,ROLE={admin:false,write:false},myName='',offline=false,slow=false,dbErr='';
 let AUTH={screen:'loading',err:'',msg:''},PROFILE=null,USERS=[];
@@ -32,8 +58,8 @@ function sortedStores(){return Object.values(S.stores).sort((a,b)=>natural(a.cod
 /* ---------- writes ---------- */
 function errMsg(e){const c=e?.code;if(c==='42501'||/row-level security/i.test(e?.message||''))return "You don't have permission for this change.";if(c==='23505')return 'That value is already used by another record (for example, an asset tag).';if(c==='23503')return 'This item is still in use by other records. Remove those first.';if(/fetch|network/i.test(e?.message||''))return "Couldn't reach the server. Check your connection and try again.";return e?.message||"Couldn't save right now. Try again."}
 const TBL={stores:'stores',types:'equipment_types',equipment:'equipment',pm:'pm_records'};
-const MAP={stores:{},types:{freqMonths:'freq_months'},equipment:{storeId:'store_id',typeId:'type_id',assetTag:'asset_tag'},pm:{equipmentId:'equipment_id',storeId:'store_id',equipmentName:'equipment_name',typeName:'type_name',storeName:'store_name',createdBy:'created_by'}};
-const COLS={stores:['id','name','code','type','location','notes'],types:['id','name','prefix','category','freqMonths','checklist'],equipment:['id','storeId','typeId','name','assetTag','brand','model','serial','ip','purchased','warranty','notes'],pm:['id','equipmentId','storeId','equipmentName','typeName','storeName','date','next','tech','kind','status','items','issues','action']};
+const MAP={stores:{leaseType:'lease_type',mallOperator:'mall_operator',mallInterface:'mall_interface',tenantId:'tenant_id'},types:{freqMonths:'freq_months',salesSending:'sales_sending'},equipment:{storeId:'store_id',typeId:'type_id',assetTag:'asset_tag'},pm:{equipmentId:'equipment_id',storeId:'store_id',equipmentName:'equipment_name',typeName:'type_name',storeName:'store_name',createdBy:'created_by'}};
+const COLS={stores:['id','name','code','type','location','notes','leaseType','mallOperator','mallInterface','tenantId'],types:['id','name','prefix','category','freqMonths','checklist','software','salesSending'],equipment:['id','storeId','typeId','name','assetTag','brand','model','serial','ip','purchased','warranty','notes'],pm:['id','equipmentId','storeId','equipmentName','typeName','storeName','date','next','tech','kind','status','items','software','sales','issues','action']};
 const DATECOLS=['purchased','warranty','date','next'];
 function toRow(k,o){const r={};for(const c of COLS[k]){if(!(c in o))continue;let v=o[c];if(DATECOLS.includes(c)&&!v)v=null;if(c==='assetTag'&&!v)v=null;if(c==='equipmentId'&&!v)v=null;r[MAP[k][c]||c]=v}if(k!=='pm')r.updated_at=new Date().toISOString();return r}
 function fromRow(k,r){const inv={};for(const [c,s] of Object.entries(MAP[k]))inv[s]=c;const o={};for(const [key,val] of Object.entries(r))o[inv[key]||key]=val;for(const c of DATECOLS)if(c in o&&o[c]==null)o[c]='';if(k==='equipment'&&o.assetTag==null)o.assetTag='';if(k==='pm')o.createdAt=Date.parse(r.created_at)||0;return o}
@@ -107,7 +133,7 @@ function viewStores(L){
   for(const s of stores){
     const si=infos.filter(i=>i.eq.storeId===s.id);
     const o=si.filter(i=>i.due==='overdue').length,soon=si.filter(i=>i.due==='soon').length,d=si.filter(i=>['Defective','Under Maintenance'].includes(i.status)).length,n=si.filter(i=>!i.last).length;
-    h+=`<a class="store-card" href="#store-${esc(s.id)}"><div class="sc-top"><span class="mono muted">${esc(s.code||'—')}</span><span class="chip">${esc(s.type||'Store')}</span></div><h3>${esc(s.name)}</h3><p class="muted">${esc(s.location||'')}</p>
+    h+=`<a class="store-card" href="#store-${esc(s.id)}"><div class="sc-top"><span class="mono muted">${esc(s.code||'—')}</span><span class="sc-chips"><span class="chip">${esc(s.type||'Store')}</span>${isPct(s)?`<span class="chip chip-lease" title="Percentage lease">% ${esc(s.mallInterface||'')}</span>`:''}</span></div><h3>${esc(s.name)}</h3><p class="muted">${esc(s.location||'')}</p>
     <div class="sc-stats"><span class="tag"><b>${si.length}</b> items</span>${o?`<span class="tag bad"><b>${o}</b> overdue</span>`:''}${soon?`<span class="tag warn"><b>${soon}</b> due soon</span>`:''}${d?`<span class="tag bad"><b>${d}</b> defective</span>`:''}${n?`<span class="tag"><b>${n}</b> no PM yet</span>`:''}${!o&&!soon&&!d&&!n&&si.length?'<span class="tag ok">All up to date</span>':''}</div></a>`;
   }
   return h+'</div>';
@@ -128,6 +154,7 @@ function viewStore(id,L){
   let h=`<div class="crumbs"><a href="#stores">Stores</a> › ${esc(s.code||'')}</div><div class="page-head"><div><div class="eyebrow">${esc(s.type||'Store')}${s.location?' · '+esc(s.location):''}</div><h1>${esc(s.name)}</h1></div><div class="actions">`;
   if(ROLE.admin)h+=`<button class="btn" data-act="edit-store" data-id="${esc(id)}">Edit store</button><button class="btn primary" data-act="add-eq" data-id="${esc(id)}">+ Add equipment</button>`;
   h+='</div></div>';
+  h+=leaseLine(s,L);
   if(s.notes)h+=`<p class="note">${esc(s.notes)}</p>`;
   if(!list.length)return h+`<div class="empty"><h3>No equipment yet</h3><p>${ROLE.admin?'Add the POS, printers, routers and other devices installed at this store.':'An admin needs to add this store\'s equipment.'}</p>${ROLE.admin?`<p><button class="btn primary" data-act="add-eq" data-id="${esc(id)}">+ Add equipment</button></p>`:''}</div>`;
   for(const c of CATS){const items=list.filter(i=>(i.type.category||'Other')===c);if(!items.length)continue;
@@ -153,7 +180,7 @@ function viewItem(id,L){
   else{h+='<div class="history">';for(const r of recs){const items=r.items||[],ok=items.filter(x=>x.r==='OK').length,bad=items.filter(x=>x.r==='Not OK').length,app=items.filter(x=>x.r!=='N/A').length;
     h+=`<div class="h-item"><div class="h-top"><b>${fmt(r.date)}</b><span class="chip">${esc(r.kind||'Preventive')}</span><span class="pill s-${slug(r.status)}">${esc(r.status||'—')}</span>${items.length?`<span class="note">${ok}/${app} OK${bad?` · <span class="r-bad">${bad} not OK</span>`:''}</span>`:''}${ROLE.admin?`<button class="btn ghost sm" style="margin-left:auto" data-act="del-pm" data-id="${esc(r.id)}">Delete</button>`:''}</div>
     <div class="h-body">${r.tech?`<div><span class="k">Technician</span>${esc(r.tech)}</div>`:''}${r.issues?`<div><span class="k">Issues</span>${esc(r.issues)}</div>`:''}${r.action?`<div><span class="k">Action</span>${esc(r.action)}</div>`:''}<div><span class="k">Next maintenance</span>${fmt(r.next)}</div></div>
-    ${items.length?`<details class="h-check"><summary>Checklist results</summary><ul>${items.map(x=>`<li><span>${esc(x.t)}</span><span class="${x.r==='OK'?'r-ok':x.r==='Not OK'?'r-bad':'r-na'}">${esc(x.r||'—')}</span></li>`).join('')}</ul></details>`:''}</div>`}
+    ${items.length?`<details class="h-check"><summary>Checklist results</summary><ul>${items.map(x=>`<li><span>${esc(x.t)}</span><span class="${x.r==='OK'?'r-ok':x.r==='Not OK'?'r-bad':'r-na'}">${esc(x.r||'—')}</span></li>`).join('')}</ul></details>`:''}${histExtra(r)}</div>`}
     h+='</div>'}
   return h+'</div></div>';
 }
@@ -183,7 +210,7 @@ function eqDetailRow(i){const r=i.last,e=i.eq;let b;
   else{const it=r.items||[],app=it.filter(x=>x.r!=='N/A'),ok=app.filter(x=>x.r==='OK').length,bm=[e.brand,e.model].filter(Boolean).join(' ');
     b=`<div class="eqd"><div class="eqd-meta"><span><span class="k">Checked</span>${fmt(r.date)} by ${esc(r.tech||'—')}</span><span><span class="k">Type</span>${r.kind==='Corrective'?'Repair':'Preventive maintenance'}</span>${it.length?`<span><span class="k">Result</span><b class="${ok===app.length?'r-ok':'r-bad'}">${ok} of ${app.length} conditions passed</b></span>`:''}${bm?`<span><span class="k">Model</span>${esc(bm)}</span>`:''}${e.serial?`<span><span class="k">Serial</span>${esc(e.serial)}</span>`:''}</div>
     ${it.length?`<ul class="eqd-list">${it.map(x=>`<li><span>${esc(x.t)}</span><span class="${x.r==='OK'?'r-ok':x.r==='Not OK'?'r-bad':'r-na'}">${x.r==='OK'?'✓ Passed':x.r==='Not OK'?'✕ Failed':'N/A'}</span></li>`).join('')}</ul>`:'<p class="note" style="margin:0">No checklist was recorded for this check.</p>'}
-    ${r.issues?`<div><span class="k">Issue found</span>${esc(r.issues)}</div>`:''}${r.action?`<div><span class="k">Action taken</span>${esc(r.action)}</div>`:''}</div>`}
+    ${extraResults(r)}${r.issues?`<div><span class="k">Issue found</span>${esc(r.issues)}</div>`:''}${r.action?`<div><span class="k">Action taken</span>${esc(r.action)}</div>`:''}</div>`}
   return `<tr class="eqd-row"><td colspan="5">${b}</td></tr>`}
 function viewDashboard(L){
   const stores=sortedStores();
@@ -209,9 +236,9 @@ function viewDashboard(L){
   for(const {s,h:sh} of sorted){const n=sh.items.length||1,cls=pctClass(sh.pct);
     const seg=[['Operational','ok'],['For Monitoring','warn'],['Under Maintenance','info'],['Defective','bad'],['none','none']].map(([k,c])=>sh.c[k]?`<span class="seg-${c}" style="width:${sh.c[k]/n*100}%"></span>`:'').join('');
     const open=UI.dashOpen&&UI.dashOpen[s.id];
-    h+=`<details class="dash-store" data-store="${esc(s.id)}" ${open?'open':''}><summary><div class="ds-head"><div class="ds-name"><h3>${esc(s.name)}</h3><span class="note">${esc([s.type,s.location].filter(Boolean).join(' · '))}</span></div><div class="ds-pct pct-${cls}"><b>${sh.pct===null?'—':sh.pct+'%'}</b><span>${sh.pct===null?'Not checked yet':'Operational'}</span></div><span class="ds-chev" aria-hidden="true">▾</span></div>
+    h+=`<details class="dash-store" data-store="${esc(s.id)}" ${open?'open':''}><summary><div class="ds-head"><div class="ds-name"><h3>${esc(s.name)}</h3><span class="note">${esc([s.type,s.location,isPct(s)?'Percentage lease':'Fixed lease'].filter(Boolean).join(' · '))}</span></div><div class="ds-pct pct-${cls}"><b>${sh.pct===null?'—':sh.pct+'%'}</b><span>${sh.pct===null?'Not checked yet':'Operational'}</span></div><span class="ds-chev" aria-hidden="true">▾</span></div>
     <div class="bar" role="img" aria-label="${sh.c['Operational']} operational, ${sh.c['For Monitoring']} for monitoring, ${sh.c['Under Maintenance']} under maintenance, ${sh.c['Defective']} defective, ${sh.c.none} not checked">${seg}</div>
-    <div class="ds-tags"><span class="tag ok"><b>${sh.c['Operational']}</b> operational</span>${sh.c['For Monitoring']?`<span class="tag warn"><b>${sh.c['For Monitoring']}</b> for monitoring</span>`:''}${sh.c['Under Maintenance']?`<span class="tag info"><b>${sh.c['Under Maintenance']}</b> under maintenance</span>`:''}${sh.c['Defective']?`<span class="tag bad"><b>${sh.c['Defective']}</b> defective</span>`:''}${sh.c.none?`<span class="tag"><b>${sh.c.none}</b> not checked yet</span>`:''}<span class="note" style="margin-left:auto">Last check ${fmt(sh.last)}</span></div></summary>
+    <div class="ds-tags">${salesTag(s,L)}<span class="tag ok"><b>${sh.c['Operational']}</b> operational</span>${sh.c['For Monitoring']?`<span class="tag warn"><b>${sh.c['For Monitoring']}</b> for monitoring</span>`:''}${sh.c['Under Maintenance']?`<span class="tag info"><b>${sh.c['Under Maintenance']}</b> under maintenance</span>`:''}${sh.c['Defective']?`<span class="tag bad"><b>${sh.c['Defective']}</b> defective</span>`:''}${sh.c.none?`<span class="tag"><b>${sh.c.none}</b> not checked yet</span>`:''}<span class="note" style="margin-left:auto">Last check ${fmt(sh.last)}</span></div></summary>
     <div class="ds-body">${sh.items.length?`<div class="tablewrap"><table><thead><tr><th>Equipment</th><th>Status</th><th>Last check</th><th>Checklist</th><th>Next PM</th></tr></thead><tbody>${sh.items.map(i=>{const op=!!(UI.dashEq&&UI.dashEq[i.eq.id]);return `<tr class="click eq-toggle${op?' is-open':''}" data-act="dash-eq" data-id="${esc(i.eq.id)}" tabindex="0" aria-expanded="${op}"><td><div class="eq-cell"><span class="eq-chev" aria-hidden="true">${op?'▾':'▸'}</span><div><b>${esc(i.eq.name)}</b><div class="note">${esc(i.type.name||'')}</div></div></div></td><td><span class="pill s-${slug(i.status)}">${esc(i.status||'Not checked yet')}</span></td><td style="white-space:nowrap">${fmt(i.lastDate)}${i.last?.tech?`<div class="note">${esc(i.last.tech)}</div>`:''}</td><td>${checksCell(i)}</td><td class="due-${i.due}" style="white-space:nowrap">${i.due==='none'?'—':fmt(i.next)}${i.due==='overdue'?'<div class="note r-bad">Overdue</div>':''}</td></tr>${op?eqDetailRow(i):''}`}).join('')}</tbody></table></div>`:'<p class="note">No equipment listed for this store yet.</p>'}</div></details>`}
   return h+'</div></section>'}
 function subnav(a){return `<div class="filters"><div class="seg" role="group" aria-label="Schedule view"><button data-act="go" data-id="schedule" aria-pressed="${a==='schedule'}">Upcoming PM</button><button data-act="go" data-id="history" aria-pressed="${a==='history'}">Maintenance History <span class="mono">${Object.keys(S.pm).length}</span></button></div></div>`}
@@ -252,7 +279,7 @@ function viewSetup(){
   <p class="note" style="max-width:70ch">Each type sets its category, how often PM is due, and the checklist used in its PM form. Changing a checklist affects new PM records only; past records keep the checklist they were done with.</p>`;
   if(!types.length)return h+`<div class="empty"><h3>No equipment types yet</h3><p>Add a type (for example All-in-One POS) with its checklist.</p></div>`;
   for(const c of CATS){const items=types.filter(t=>(t.category||'Other')===c);if(!items.length)continue;
-    h+=`<section class="cat"><h2>${esc(c)} <span>${items.length}</span></h2><div class="list types-list">${items.map(t=>{const used=Object.values(S.equipment).filter(e=>e.typeId===t.id).length;return `<div class="t-row"><div class="eq-main"><span class="eq-name">${esc(t.name)}</span><span class="muted">${(t.checklist||[]).length} checklist items · ${freqLabel(t.freqMonths)} · used by ${used}</span></div><span></span><button class="btn sm" data-act="edit-type" data-id="${esc(t.id)}">Edit</button></div>`}).join('')}</div></section>`}
+    h+=`<section class="cat"><h2>${esc(c)} <span>${items.length}</span></h2><div class="list types-list">${items.map(t=>{const used=Object.values(S.equipment).filter(e=>e.typeId===t.id).length;return `<div class="t-row"><div class="eq-main"><span class="eq-name">${esc(t.name)}</span><span class="muted">${(t.checklist||[]).length} checklist items${(t.software||[]).length?` · ${(t.software||[]).length} software`:''}${t.salesSending?' · daily sales':''} · ${freqLabel(t.freqMonths)} · used by ${used}</span></div><span></span><button class="btn sm" data-act="edit-type" data-id="${esc(t.id)}">Edit</button></div>`}).join('')}</div></section>`}
   h+=`<section class="cat"><h2>Who can do what</h2><div class="panel"><dl class="info"><dt><b>Admin</b></dt><dd>Adds and edits stores, equipment, types and users; can delete records.</dd><dt><b>IT Staff</b></dt><dd>Records PM and repairs. Cannot change stores, equipment or types.</dd><dt><b>Manager</b></dt><dd>Sees only the Dashboard. Cannot record or change anything.</dd></dl><p class="note" style="margin:10px 0 0">Approve new accounts and set roles in the <a href="#users">Users</a> tab.</p></div></section>`;
   return h;
 }
@@ -270,10 +297,17 @@ let onSubmit=null;
 function storeForm(s){
   const isNew=!s;s=s||{};
   openSheet(isNew?'Add store':'Edit store',
-    `<div class="row2">${inp('f-name','Store name *',s.name,'text','required')}${inp('f-code','Store code',s.code)}</div><div class="row2">${sel('f-type','Store type',STORE_TYPES,s.type||'In-Line')}${inp('f-loc','Location / Mall',s.location)}</div>${ta('f-notes','Notes',s.notes)}`,
+    `<div class="row2">${inp('f-name','Store name *',s.name,'text','required')}${inp('f-code','Store code',s.code)}</div><div class="row2">${sel('f-type','Store type',STORE_TYPES,s.type||'In-Line')}${inp('f-loc','Location / Mall',s.location)}</div>
+    <div class="row2">${sel('f-lease','Lease type',LEASE_TYPES,s.leaseType||'Fixed')}<div></div></div>
+    <div class="subbox" id="sales-box" ${isPct(s)?'':'hidden'}><p class="note" style="margin:0">Percentage-lease stores send daily sales to the mall. This is checked during POS PM.</p>
+    <div class="row2">${sel('f-mall','Mall operator',MALLS.map(m=>m[0]),s.mallOperator||'SM Supermalls')}${inp('f-iface','Daily sales interface',s.mallInterface||mallIface(s.mallOperator||'SM Supermalls'))}</div>
+    ${inp('f-tenant','Tenant / store ID for sales sending (optional)',s.tenantId)}</div>
+    ${ta('f-notes','Notes',s.notes)}`,
     `${isNew?'':`<button type="button" class="btn danger" data-act="del-store" data-id="${esc(s.id)}" style="margin-right:auto">Delete store</button>`}<button type="button" class="btn" data-act="close">Cancel</button><button class="btn primary" type="submit">${isNew?'Add store':'Save'}</button>`);
-  onSubmit=async()=>{if(!v('f-name'))return toast('Enter a store name.',true);const id=s.id||newId('store');
-    if(await put('stores/'+id,{name:v('f-name'),code:v('f-code'),type:v('f-type'),location:v('f-loc'),notes:v('f-notes'),updatedAt:Date.now()})){closeSheet();toast(isNew?'Store added':'Store saved');if(isNew)location.hash='store-'+id}};
+  const lease=document.getElementById('f-lease'),box=document.getElementById('sales-box'),mall=document.getElementById('f-mall'),iface=document.getElementById('f-iface');let ifaceTouched=!!s.mallInterface;
+  lease.addEventListener('change',()=>{box.hidden=lease.value!=='Percentage'});iface.addEventListener('input',()=>ifaceTouched=true);mall.addEventListener('change',()=>{if(!ifaceTouched||!iface.value)iface.value=mallIface(mall.value)});
+  onSubmit=async()=>{if(!v('f-name'))return toast('Enter a store name.',true);const id=s.id||newId('store');const pct=v('f-lease')==='Percentage';if(pct&&!v('f-iface'))return toast('Enter the daily sales interface (for example SIA Mosaic).',true);
+    if(await put('stores/'+id,{name:v('f-name'),code:v('f-code'),type:v('f-type'),location:v('f-loc'),notes:v('f-notes'),leaseType:v('f-lease'),mallOperator:pct?v('f-mall'):'',mallInterface:pct?v('f-iface'):'',tenantId:pct?v('f-tenant'):'',updatedAt:Date.now()})){closeSheet();toast(isNew?'Store added':'Store saved');if(isNew)location.hash='store-'+id}};
 }
 
 function typeOptions(){const types=Object.values(S.types);return CATS.flatMap(c=>types.filter(t=>(t.category||'Other')===c).sort((a,b)=>natural(a.name,b.name)).map(t=>[t.id,`${t.name} — ${c}`]))}
@@ -329,21 +363,25 @@ function typeForm(t){
   openSheet(isNew?'Add equipment type':'Edit equipment type',
     `<div class="row2">${inp('f-name','Type name *',t.name,'text','required')}${inp('f-prefix','Default item name',t.prefix,'text','placeholder="e.g. POS"')}</div>
     <div class="row2">${sel('f-cat','Category',CATS,t.category)}${sel('f-freq','PM frequency',[['1','Monthly'],['2','Every 2 months'],['3','Quarterly'],['6','Every 6 months'],['12','Yearly']],String(t.freqMonths||1))}</div>
-    ${ta('f-check','Checklist — one item per line *',(t.checklist||[]).join('\n'),'style="min-height:180px"')}`,
+    ${ta('f-check','Checklist — one item per line *',(t.checklist||[]).join('\n'),'style="min-height:180px"')}
+    ${ta('f-soft','Software to check — one per line (optional)',(t.software||[]).join('\n'),'style="min-height:120px" placeholder="WebPOS&#10;AnyDesk&#10;UltraViewer"')}
+    <label class="checkline"><input type="checkbox" id="f-sales" ${t.salesSending?'checked':''}><span>This equipment sends daily sales to the mall. The daily sales checks appear in its PM form at Percentage-lease stores.</span></label>`,
     `${isNew?'':`<button type="button" class="btn danger" data-act="del-type" data-id="${esc(t.id)}" style="margin-right:auto">Delete type</button>`}<button type="button" class="btn" data-act="close">Cancel</button><button class="btn primary" type="submit">${isNew?'Add type':'Save'}</button>`);
   onSubmit=async()=>{const list=v('f-check').split('\n').map(x=>x.trim()).filter(Boolean);if(!v('f-name'))return toast('Enter a type name.',true);if(!list.length)return toast('Add at least one checklist item.',true);
-    const id=t.id||newId('type');if(await put('types/'+id,{name:v('f-name'),prefix:v('f-prefix'),category:v('f-cat'),freqMonths:Number(v('f-freq'))||1,checklist:list,updatedAt:Date.now()})){closeSheet();toast(isNew?'Type added':'Type saved')}};
+    const soft=v('f-soft').split('\n').map(x=>x.trim()).filter(Boolean);const id=t.id||newId('type');if(await put('types/'+id,{name:v('f-name'),prefix:v('f-prefix'),category:v('f-cat'),freqMonths:Number(v('f-freq'))||1,checklist:list,software:soft,salesSending:!!document.getElementById('f-sales')?.checked,updatedAt:Date.now()})){closeSheet();toast(isNew?'Type added':'Type saved')}};
 }
 
 function pmForm(e){
-  const t=S.types[e.typeId]||{checklist:[],freqMonths:1};const s=S.stores[e.storeId]||{};const L=latestMap();const prev=L[e.id];
+  const t=S.types[e.typeId]||{checklist:[],freqMonths:1};const s=S.stores[e.storeId]||{};const L=latestMap();const prev=L[e.id];const showSales=isPct(s)&&!!t.salesSending;
   const d=today();
   openSheet(`Record PM · ${e.name}`,
     `<p class="note" style="margin:0">${esc(s.name||'')} · ${esc(t.name||'')}${e.serial?' · SN '+esc(e.serial):''}</p>
     <div class="row2">${inp('f-date','Inspection date *',d,'date','required')}${inp('f-tech','Technician *',myName,'text','required')}</div>
     ${sel('f-kind','Maintenance type',['Preventive','Corrective / Repair'],'Preventive')}
     <div class="field"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><label>Preventive maintenance checklist</label><button type="button" class="btn sm" data-act="all-ok">Mark all OK</button></div>
-    <div class="checks">${(t.checklist||[]).map((c,k)=>`<div class="check-row"><span class="t">${esc(c)}</span><span class="rad" role="radiogroup" aria-label="${esc(c)}">${[['OK','v-ok'],['Not OK','v-bad'],['N/A','v-na']].map(([val,cl])=>`<label><input type="radio" name="c${k}" value="${val}"><span class="${cl}">${val}</span></label>`).join('')}</span></div>`).join('')||'<div class="check-row muted">This type has no checklist yet.</div>'}</div></div>
+    <div class="checks">${radioRows('c',t.checklist||[],LBL_CHECK)||'<div class="check-row muted">This type has no checklist yet.</div>'}</div></div>
+    ${(t.software||[]).length?`<div class="field"><label>Software</label><div class="checks">${radioRows('sw',t.software,LBL_SOFT)}</div></div>`:''}
+    ${showSales?`<div class="field"><label>Daily sales sending · ${esc(s.mallInterface||'Mall interface')}${s.mallOperator?` (${esc(s.mallOperator)})`:''}</label><div class="checks">${radioRows('sl',SALES_CHECKS,LBL_SALES)}</div>${inp('f-lastsent','Last successful send (optional)','','date')}</div>`:''}
     <div class="field"><label>Equipment status *</label><div class="status-pick" role="radiogroup" aria-label="Equipment status">${STATUSES.map(st=>`<label title="${esc(STATUS_HELP[st])}"><input type="radio" name="f-status" value="${st}" ${(prev?.status||'Operational')===st?'checked':''}><span class="pill s-${slug(st)}">${st}</span></label>`).join('')}</div></div>
     ${ta('f-issues','Issues found',prev&&prev.status!=='Operational'?prev.issues:'','placeholder="Leave blank if none"')}
     ${ta('f-action','Action taken','')}
@@ -356,9 +394,11 @@ function pmForm(e){
     if(!v('f-date'))return toast('Enter the inspection date.',true);if(!v('f-tech'))return toast('Enter the technician name.',true);
     const items=(t.checklist||[]).map((c,k)=>({t:c,r:document.querySelector(`input[name="c${k}"]:checked`)?.value||''}));
     const missing=items.filter(x=>!x.r).length;if(missing)return toast(`Answer all checklist items (${missing} left).`,true);
+    const sw=readRadios('sw',t.software||[]);const swLeft=sw.filter(x=>!x.r).length;if(swLeft)return toast(`Answer all software items (${swLeft} left).`,true);
+    let sales=null;if(showSales){const it=readRadios('sl',SALES_CHECKS);const left=it.filter(x=>!x.r).length;if(left)return toast(`Answer all daily sales checks (${left} left).`,true);sales={interface:s.mallInterface||'',operator:s.mallOperator||'',items:it,lastSent:v('f-lastsent')}}
     const status=document.querySelector('input[name="f-status"]:checked')?.value;if(!status)return toast('Choose the equipment status.',true);
     const by=null;
-    const rec={equipmentId:e.id,storeId:e.storeId,date:v('f-date'),tech:v('f-tech'),kind:v('f-kind').startsWith('Corrective')?'Corrective':'Preventive',items,status,issues:v('f-issues'),action:v('f-action'),next:v('f-next'),by:by||'',createdAt:Date.now()};
+    const rec={equipmentId:e.id,storeId:e.storeId,date:v('f-date'),tech:v('f-tech'),kind:v('f-kind').startsWith('Corrective')?'Corrective':'Preventive',items,software:sw,sales,status,issues:v('f-issues'),action:v('f-action'),next:v('f-next'),by:by||'',createdAt:Date.now()};
     if(await put('pm/'+newId('pm'),rec)){closeSheet();toast('PM record saved')}};
 }
 
@@ -367,12 +407,12 @@ function confirmSheet(title,msg,label,fn){openSheet(title,`<p style="margin:0">$
 /* ---------- export ---------- */
 function csv(rows){return '﻿'+rows.map(r=>r.map(c=>{const s=String(c??'');return /[",\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s}).join(',')).join('\r\n')}
 async function saveFile(name,data){try{const blob=new Blob([data],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000);toast('File downloaded')}catch(e){toast("The file couldn't be saved.",true)}}
-function exportMaster(){const L=latestMap();const rows=[['Store','Store Code','Store Type','Category','Equipment Type','Name','Brand','Model','Serial No.','IP Address','Date Purchased','Warranty End','Status','Last PM','Next PM','PM State']];
-  for(const s of sortedStores())for(const e of sortEquip(storeEquip(s.id))){const i=eqInfo(e,L);rows.push([s.name,s.code,s.type,i.type.category,i.type.name,e.name,e.brand,e.model,e.serial,e.ip,e.purchased,e.warranty,i.status||'No PM yet',i.lastDate,i.next,{overdue:'Overdue',soon:'Due soon',ok:'OK',none:'No PM yet'}[i.due]])}
+function exportMaster(){const L=latestMap();const rows=[['Store','Store Code','Store Type','Lease Type','Daily Sales Interface','Category','Equipment Type','Name','Brand','Model','Serial No.','IP Address','Date Purchased','Warranty End','Status','Last PM','Next PM','PM State']];
+  for(const s of sortedStores())for(const e of sortEquip(storeEquip(s.id))){const i=eqInfo(e,L);rows.push([s.name,s.code,s.type,s.leaseType||'Fixed',isPct(s)?s.mallInterface:'',i.type.category,i.type.name,e.name,e.brand,e.model,e.serial,e.ip,e.purchased,e.warranty,i.status||'No PM yet',i.lastDate,i.next,{overdue:'Overdue',soon:'Due soon',ok:'OK',none:'No PM yet'}[i.due]])}
   saveFile(`Equipment_Masterlist_${today()}.csv`,csv(rows))}
-function exportHistory(list){const rows=[['Date','Store','Equipment','Type','Maintenance Type','Technician','Status','Checklist OK','Checklist Not OK','Not OK Items','Issues Found','Action Taken','Next Maintenance']];
+function exportHistory(list){const rows=[['Date','Store','Equipment','Type','Maintenance Type','Technician','Status','Checklist OK','Checklist Not OK','Not OK Items','Issues Found','Action Taken','Next Maintenance','Software Issues','Daily Sales Check']];
   const recs=(list||Object.values(S.pm)).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-  for(const r of recs){const e=S.equipment[r.equipmentId]||{};const items=r.items||[];rows.push([r.date,S.stores[r.storeId]?.name||r.storeName||'',e.name||(r.equipmentName?r.equipmentName+' (removed)':'(removed)'),e.typeId?typeName(e.typeId):(r.typeName||''),r.kind,r.tech,r.status,items.filter(x=>x.r==='OK').length,items.filter(x=>x.r==='Not OK').length,items.filter(x=>x.r==='Not OK').map(x=>x.t).join('; '),r.issues,r.action,r.next])}
+  for(const r of recs){const e=S.equipment[r.equipmentId]||{};const items=r.items||[];rows.push([r.date,S.stores[r.storeId]?.name||r.storeName||'',e.name||(r.equipmentName?r.equipmentName+' (removed)':'(removed)'),e.typeId?typeName(e.typeId):(r.typeName||''),r.kind,r.tech,r.status,items.filter(x=>x.r==='OK').length,items.filter(x=>x.r==='Not OK').length,items.filter(x=>x.r==='Not OK').map(x=>x.t).join('; '),r.issues,r.action,r.next,(r.software||[]).filter(x=>x.r==='Not OK').map(x=>x.t).join('; '),r.sales?((r.sales.items||[]).some(x=>x.r==='Not OK')?'Issue: '+(r.sales.items||[]).filter(x=>x.r==='Not OK').map(x=>x.t).join('; '):'OK')+(r.sales.interface?' ('+r.sales.interface+')':''):''])}
   saveFile(`PM_History_${today()}.csv`,csv(rows))}
 
 /* ---------- events ---------- */
